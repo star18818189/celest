@@ -8,7 +8,7 @@ return LPH_NO_VIRTUALIZE(function()
 			["Default"] = {
 				1,
 				httpService:JSONDecode(
-					'{"FontColor":"ffffff","MainColor":"1c1c1c","AccentColor":"0055ff","BackgroundColor":"141414","OutlineColor":"323232"}'
+					'{"FontColor":"ffffff","MainColor":"1c1c1c","AccentColor":"ffffff","BackgroundColor":"141414","OutlineColor":"323232"}'
 				),
 			},
 			["BBot"] = {

@@ -57,6 +57,7 @@ local menuMaid = Maid.new()
 
 -- Constants.
 local VERSION = "1.03"
+local DEFAULT_DISPLAY_NAME = string.format("Celestial v%s", VERSION)
 
 Menu.VERSION = VERSION
 
@@ -69,13 +70,17 @@ pcall(function()
 	gameName = productInfo.Name or "Unknown"
 end)
 
-local MENU_TITLE = string.format("Celestial v%s | %s", VERSION, gameName)
+local displayName = DEFAULT_DISPLAY_NAME
+
+local function getMenuTitle()
+	return string.format("%s | %s", displayName, gameName)
+end
 
 ---Initialize menu.
 function Menu.init()
 	-- Create window.
 	local window = Library:CreateWindow({
-		Title = MENU_TITLE,
+		Title = getMenuTitle(),
 		Center = true,
 		AutoShow = not shared.Celestial.silent,
 		TabPadding = 8,
@@ -97,6 +102,7 @@ function Menu.init()
 		"InfiniteJump",
 		"TweenToObjective",
 		"TweenToBack",
+		"MenuBackgroundFileList",
 	})
 
 	-- Initialize all tabs. Don't initialize them if we have the 'exploit_tester' role.
@@ -106,7 +112,13 @@ function Menu.init()
 	VisualsTab.init(window)
 	AutomationTab.init(window)
 	ExploitTab.init(window)
-	CelestialTab.init(window)
+	CelestialTab.init(window, {
+		DefaultDisplayName = DEFAULT_DISPLAY_NAME,
+		SetDisplayName = function(Name)
+			displayName = Name
+			window:SetWindowTitle(getMenuTitle())
+		end,
+	})
 
 	-- Last update.
 	local lastUpdate = os.clock()
@@ -148,7 +160,7 @@ function Menu.init()
 				or "N/A"
 
 			-- String.
-			local str = string.format("%s | %.2fms | %.1f/s | %.1fms | %.1fms", MENU_TITLE, ping, fps, cpu, gpu)
+			local str = string.format("%s | %.2fms | %.1f/s | %.1fms | %.1fms", getMenuTitle(), ping, fps, cpu, gpu)
 
 			if Configuration.expectToggleValue("ShowDebugInformation") then
 				str = str .. string.format(" | %s", positionFormat)

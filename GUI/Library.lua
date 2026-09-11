@@ -45,7 +45,7 @@ return LPH_NO_VIRTUALIZE(function()
 		FontColor = Color3.fromRGB(255, 255, 255),
 		MainColor = Color3.fromRGB(28, 28, 28),
 		BackgroundColor = Color3.fromRGB(20, 20, 20),
-		AccentColor = Color3.fromRGB(0, 85, 255),
+		AccentColor = Color3.fromRGB(255, 255, 255),
 		OutlineColor = Color3.fromRGB(50, 50, 50),
 		RiskColor = Color3.fromRGB(255, 50, 50),
 
@@ -3992,10 +3992,13 @@ return LPH_NO_VIRTUALIZE(function()
 
 		Library:MakeDraggable(Outer, 25)
 
-		local Inner = Library:Create("Frame", {
+		local Inner = Library:Create("ImageLabel", {
 			BackgroundColor3 = Library.MainColor,
 			BorderColor3 = Library.AccentColor,
 			BorderMode = Enum.BorderMode.Inset,
+			Image = "",
+			ImageTransparency = 1,
+			ScaleType = Enum.ScaleType.Crop,
 			Position = UDim2.new(0, 1, 0, 1),
 			Size = UDim2.new(1, -2, 1, -2),
 			ZIndex = 1,
@@ -4077,6 +4080,42 @@ return LPH_NO_VIRTUALIZE(function()
 			BackgroundColor3 = "MainColor",
 			BorderColor3 = "OutlineColor",
 		})
+
+		local BackgroundSurfaces = { MainSectionOuter, MainSectionInner, TabContainer }
+
+		Window.BackgroundEnabled = false
+		Window.BackgroundOpacity = 0.55
+
+		local function UpdateBackground()
+			local opacity = math.clamp(Window.BackgroundOpacity, 0, 1)
+			local panelTransparency = Window.BackgroundEnabled and math.min(opacity * 0.65, 0.55) or 0
+
+			Inner.ImageTransparency = Window.BackgroundEnabled and (1 - opacity) or 1
+
+			for _, Surface in next, BackgroundSurfaces do
+				Surface.BackgroundTransparency = panelTransparency
+			end
+		end
+
+		function Window:RegisterBackgroundSurface(Surface)
+			table.insert(BackgroundSurfaces, Surface)
+			UpdateBackground()
+		end
+
+		function Window:SetBackgroundImage(Image)
+			Window.BackgroundEnabled = type(Image) == "string" and Image ~= ""
+			Inner.Image = Window.BackgroundEnabled and Image or ""
+			UpdateBackground()
+		end
+
+		function Window:SetBackgroundOpacity(Opacity)
+			Window.BackgroundOpacity = math.clamp(tonumber(Opacity) or 0.55, 0, 1)
+			UpdateBackground()
+		end
+
+		function Window:ClearBackgroundImage()
+			Window:SetBackgroundImage("")
+		end
 
 		function Window:SetWindowTitle(Title)
 			WindowLabel.Text = Title
@@ -4242,6 +4281,9 @@ return LPH_NO_VIRTUALIZE(function()
 					BackgroundColor3 = "BackgroundColor",
 				})
 
+				Window:RegisterBackgroundSurface(BoxOuter)
+				Window:RegisterBackgroundSurface(BoxInner)
+
 				local Highlight = Library:Create("Frame", {
 					BackgroundColor3 = Library.AccentColor,
 					BorderSizePixel = 0,
@@ -4350,6 +4392,9 @@ return LPH_NO_VIRTUALIZE(function()
 				Library:AddToRegistry(BoxInner, {
 					BackgroundColor3 = "BackgroundColor",
 				})
+
+				Window:RegisterBackgroundSurface(BoxOuter)
+				Window:RegisterBackgroundSurface(BoxInner)
 
 				local Highlight = Library:Create("Frame", {
 					BackgroundColor3 = Library.AccentColor,
