@@ -76136,12 +76136,33 @@ return LPH_NO_VIRTUALIZE(function()
 	-- FPS boost state.
 	local fpsBoostActive = false
 	local fpsBoostGeneration = 0
+	local lastFPSBoostGlobalRefresh = 0
 	local fpsBoostOriginals = setmetatable({}, { __mode = "k" })
+	local fpsBoostDisabledClasses = {
+		ParticleEmitter = true,
+		Trail = true,
+		Beam = true,
+		Smoke = true,
+		Fire = true,
+		Sparkles = true,
+		PointLight = true,
+		SpotLight = true,
+		SurfaceLight = true,
+		BloomEffect = true,
+		BlurEffect = true,
+		ColorCorrectionEffect = true,
+		ColorGradingEffect = true,
+		DepthOfFieldEffect = true,
+		SunRaysEffect = true,
+		Highlight = true,
+		Clouds = true,
+	}
 
 	-- Signals.
 	local renderStepped = Signal.new(runService.RenderStepped)
 	local workspaceDescendantAdded = Signal.new(workspace.DescendantAdded)
 	local workspaceDescendantRemoving = Signal.new(workspace.DescendantRemoving)
+	local lightingDescendantAdded = Signal.new(lighting.DescendantAdded)
 
 	-- Originals.
 	local originalBlindseerState = false
@@ -76150,72 +76171,146 @@ return LPH_NO_VIRTUALIZE(function()
 	local lastUpdate = os.clock()
 	local lastWindEffectTimestamp = os.clock()
 
+	---Write a property, using Madium's reflection API when Roblox blocks normal assignment.
+	---@param instance any
+	---@param property string
+	---@param value any
+	---@return boolean
+	local function writeFPSBoostProperty(instance, property, value)
+		local success = pcall(function()
+			instance[property] = value
+		end)
+		if success then
+			return true
+		end
+
+		if typeof(instance) == "Instance" and type(sethiddenproperty) == "function" then
+			local hiddenSuccess, result = pcall(sethiddenproperty, instance, property, value)
+			if hiddenSuccess and result ~= false then
+				return true
+			end
+		end
+
+		return false
+	end
+
 	---Set and remember an instance property for FPS boost restoration.
-	---@param instance Instance
+	---@param instance any
 	---@param property string
 	---@param value any
 	local function setFPSBoostProperty(instance, property, value)
 		local originals = fpsBoostOriginals[instance]
+		if originals and originals[property] then
+			writeFPSBoostProperty(instance, property, value)
+			return
+		end
+
+		local readSuccess, original = pcall(function()
+			return instance[property]
+		end)
+		if not readSuccess or original == value then
+			return
+		end
+
+		local writeSuccess = writeFPSBoostProperty(instance, property, value)
+		if not writeSuccess then
+			return
+		end
+
 		if not originals then
 			originals = {}
 			fpsBoostOriginals[instance] = originals
 		end
 
-		if not originals[property] then
-			local success, original = pcall(function()
-				return instance[property]
-			end)
-			if not success then
-				return
-			end
-
-			originals[property] = { value = original }
-		end
-
-		pcall(function()
-			instance[property] = value
-		end)
+		originals[property] = { value = original }
 	end
 
-	---Remove render-heavy textures and material detail from an instance.
+	---Apply maximum-performance rendering settings to an instance.
 	---@param instance Instance
 	local function applyFPSBoost(instance)
-		if instance:IsA("Decal") or instance:IsA("Texture") then
+		local className = instance.ClassName
+
+		if className == "Decal" or className == "Texture" then
 			setFPSBoostProperty(instance, "Texture", "")
-		end
-
-		if instance:IsA("MeshPart") then
+			setFPSBoostProperty(instance, "Transparency", 1)
+		elseif className == "MeshPart" then
 			setFPSBoostProperty(instance, "TextureID", "")
-		end
-
-		if instance:IsA("SpecialMesh") then
+			setFPSBoostProperty(instance, "RenderFidelity", Enum.RenderFidelity.Performance)
+			setFPSBoostProperty(instance, "DoubleSided", false)
+		elseif className == "SpecialMesh" then
 			setFPSBoostProperty(instance, "TextureId", "")
-		end
-
-		if instance:IsA("SurfaceAppearance") then
+		elseif className == "SurfaceAppearance" then
 			setFPSBoostProperty(instance, "ColorMap", "")
 			setFPSBoostProperty(instance, "MetalnessMap", "")
 			setFPSBoostProperty(instance, "NormalMap", "")
 			setFPSBoostProperty(instance, "RoughnessMap", "")
+		elseif className == "Atmosphere" then
+			setFPSBoostProperty(instance, "Density", 0)
+			setFPSBoostProperty(instance, "Haze", 0)
+			setFPSBoostProperty(instance, "Glare", 0)
+		elseif className == "Sky" then
+			setFPSBoostProperty(instance, "SkyboxBk", "")
+			setFPSBoostProperty(instance, "SkyboxDn", "")
+			setFPSBoostProperty(instance, "SkyboxFt", "")
+			setFPSBoostProperty(instance, "SkyboxLf", "")
+			setFPSBoostProperty(instance, "SkyboxRt", "")
+			setFPSBoostProperty(instance, "SkyboxUp", "")
+			setFPSBoostProperty(instance, "SunTextureId", "")
+			setFPSBoostProperty(instance, "MoonTextureId", "")
+			setFPSBoostProperty(instance, "CelestialBodiesShown", false)
+			setFPSBoostProperty(instance, "StarCount", 0)
+		elseif className == "Shirt" then
+			setFPSBoostProperty(instance, "ShirtTemplate", "")
+		elseif className == "Pants" then
+			setFPSBoostProperty(instance, "PantsTemplate", "")
+		elseif className == "ShirtGraphic" then
+			setFPSBoostProperty(instance, "Graphic", "")
+		elseif className == "Explosion" then
+			setFPSBoostProperty(instance, "Visible", false)
+		elseif fpsBoostDisabledClasses[className] then
+			setFPSBoostProperty(instance, "Enabled", false)
 		end
 
 		if instance:IsA("BasePart") then
 			setFPSBoostProperty(instance, "Material", Enum.Material.SmoothPlastic)
 			setFPSBoostProperty(instance, "MaterialVariant", "")
 			setFPSBoostProperty(instance, "Reflectance", 0)
+			setFPSBoostProperty(instance, "CastShadow", false)
 		end
+	end
+
+	---Apply render-wide FPS boost settings before processing descendants.
+	local function applyFPSBoostGlobals()
+		setFPSBoostProperty(lighting, "GlobalShadows", false)
+		setFPSBoostProperty(lighting, "EnvironmentDiffuseScale", 0)
+		setFPSBoostProperty(lighting, "EnvironmentSpecularScale", 0)
+		setFPSBoostProperty(lighting, "ShadowSoftness", 0)
+		setFPSBoostProperty(lighting, "PrioritizeLightingQuality", false)
+		setFPSBoostProperty(lighting, "Technology", Enum.Technology.Compatibility)
+
+		local terrain = workspace:FindFirstChildOfClass("Terrain")
+		if terrain then
+			setFPSBoostProperty(terrain, "Decoration", false)
+			setFPSBoostProperty(terrain, "WaterWaveSize", 0)
+			setFPSBoostProperty(terrain, "WaterWaveSpeed", 0)
+			setFPSBoostProperty(terrain, "WaterReflectance", 0)
+			setFPSBoostProperty(terrain, "WaterTransparency", 1)
+		end
+
+		pcall(function()
+			setFPSBoostProperty(settings().Rendering, "QualityLevel", Enum.QualityLevel.Level01)
+		end)
 	end
 
 	---Restore everything changed by FPS boost.
 	local function restoreFPSBoost()
 		fpsBoostGeneration = fpsBoostGeneration + 1
 		fpsBoostActive = false
+		lastFPSBoostGlobalRefresh = 0
 
 		for instance, originals in next, fpsBoostOriginals do
 			for property, original in next, originals do
-				pcall(function()
-					instance[property] = original.value
-				end)
+				writeFPSBoostProperty(instance, property, original.value)
 			end
 		end
 
@@ -76227,6 +76322,10 @@ return LPH_NO_VIRTUALIZE(function()
 	local function setFPSBoostEnabled(enabled)
 		enabled = enabled == true
 		if enabled == fpsBoostActive then
+			if enabled and os.clock() - lastFPSBoostGlobalRefresh >= 1 then
+				lastFPSBoostGlobalRefresh = os.clock()
+				applyFPSBoostGlobals()
+			end
 			return
 		end
 
@@ -76236,17 +76335,26 @@ return LPH_NO_VIRTUALIZE(function()
 
 		fpsBoostGeneration = fpsBoostGeneration + 1
 		fpsBoostActive = true
+		lastFPSBoostGlobalRefresh = os.clock()
+		applyFPSBoostGlobals()
 
 		local generation = fpsBoostGeneration
 		task.spawn(function()
-			for index, descendant in ipairs(workspace:GetDescendants()) do
+			local descendants = workspace:GetDescendants()
+			local lightingDescendants = lighting:GetDescendants()
+
+			for _, descendant in ipairs(lightingDescendants) do
+				descendants[#descendants + 1] = descendant
+			end
+
+			for index, descendant in ipairs(descendants) do
 				if not fpsBoostActive or generation ~= fpsBoostGeneration then
 					return
 				end
 
 				applyFPSBoost(descendant)
 
-				if index % 250 == 0 then
+				if index % 500 == 0 then
 					task.wait()
 				end
 			end
@@ -76662,6 +76770,14 @@ return LPH_NO_VIRTUALIZE(function()
 		end
 	end
 
+	---Apply FPS boost to newly-created lighting objects.
+	---@param descendant Instance
+	local function onLightingDescendantAdded(descendant)
+		if fpsBoostActive then
+			applyFPSBoost(descendant)
+		end
+	end
+
 	---Set FPS boost immediately from the UI.
 	---@param enabled boolean
 	function Removal.setFPSBoost(enabled)
@@ -76688,6 +76804,7 @@ return LPH_NO_VIRTUALIZE(function()
 		removalMaid:add(
 			workspaceDescendantRemoving:connect("Removal_WorkspaceDescendantRemoving", onWorkspaceDescendantRemoving)
 		)
+		removalMaid:add(lightingDescendantAdded:connect("Removal_LightingDescendantAdded", onLightingDescendantAdded))
 
 		removalMaid:add(renderStepped:connect("Removal_RenderStepped", updateRemoval))
 		removalMaid:add(effectAddedSignal:connect("Removal_EffectAdded", updateRemovalEffects))
@@ -83542,7 +83659,7 @@ end
 function VisualsTab.initVisualRemovalsSection(groupbox)
 	groupbox:AddToggle("FPSBoost", {
 		Text = "FPS Boost",
-		Tooltip = "Hide world textures and material detail to improve rendering performance.",
+		Tooltip = "Maximum performance mode: simplify materials and disable textures, shadows, effects, lights, and costly rendering.",
 		Default = false,
 		Callback = function(Value)
 			Removal.setFPSBoost(Value)
