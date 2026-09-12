@@ -298,7 +298,7 @@ end
 function VisualsTab.initVisualRemovalsSection(groupbox)
 	groupbox:AddToggle("FPSBoost", {
 		Text = "FPS Boost",
-		Tooltip = "Maximum performance mode: simplify materials and disable textures, shadows, effects, lights, and costly rendering.",
+		Tooltip = "Low-overhead mode: reduce render quality and remove world textures without breaking gameplay effects.",
 		Default = false,
 		Callback = function(Value)
 			Removal.setFPSBoost(Value)

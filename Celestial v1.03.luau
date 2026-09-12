@@ -76138,31 +76138,11 @@ return LPH_NO_VIRTUALIZE(function()
 	local fpsBoostGeneration = 0
 	local lastFPSBoostGlobalRefresh = 0
 	local fpsBoostOriginals = setmetatable({}, { __mode = "k" })
-	local fpsBoostDisabledClasses = {
-		ParticleEmitter = true,
-		Trail = true,
-		Beam = true,
-		Smoke = true,
-		Fire = true,
-		Sparkles = true,
-		PointLight = true,
-		SpotLight = true,
-		SurfaceLight = true,
-		BloomEffect = true,
-		BlurEffect = true,
-		ColorCorrectionEffect = true,
-		ColorGradingEffect = true,
-		DepthOfFieldEffect = true,
-		SunRaysEffect = true,
-		Highlight = true,
-		Clouds = true,
-	}
 
 	-- Signals.
 	local renderStepped = Signal.new(runService.RenderStepped)
 	local workspaceDescendantAdded = Signal.new(workspace.DescendantAdded)
 	local workspaceDescendantRemoving = Signal.new(workspace.DescendantRemoving)
-	local lightingDescendantAdded = Signal.new(lighting.DescendantAdded)
 
 	-- Originals.
 	local originalBlindseerState = false
@@ -76225,18 +76205,15 @@ return LPH_NO_VIRTUALIZE(function()
 		originals[property] = { value = original }
 	end
 
-	---Apply maximum-performance rendering settings to an instance.
+	---Remove texture assets from an instance without changing gameplay visuals or geometry.
 	---@param instance Instance
 	local function applyFPSBoost(instance)
 		local className = instance.ClassName
 
 		if className == "Decal" or className == "Texture" then
 			setFPSBoostProperty(instance, "Texture", "")
-			setFPSBoostProperty(instance, "Transparency", 1)
 		elseif className == "MeshPart" then
 			setFPSBoostProperty(instance, "TextureID", "")
-			setFPSBoostProperty(instance, "RenderFidelity", Enum.RenderFidelity.Performance)
-			setFPSBoostProperty(instance, "DoubleSided", false)
 		elseif className == "SpecialMesh" then
 			setFPSBoostProperty(instance, "TextureId", "")
 		elseif className == "SurfaceAppearance" then
@@ -76244,49 +76221,13 @@ return LPH_NO_VIRTUALIZE(function()
 			setFPSBoostProperty(instance, "MetalnessMap", "")
 			setFPSBoostProperty(instance, "NormalMap", "")
 			setFPSBoostProperty(instance, "RoughnessMap", "")
-		elseif className == "Atmosphere" then
-			setFPSBoostProperty(instance, "Density", 0)
-			setFPSBoostProperty(instance, "Haze", 0)
-			setFPSBoostProperty(instance, "Glare", 0)
-		elseif className == "Sky" then
-			setFPSBoostProperty(instance, "SkyboxBk", "")
-			setFPSBoostProperty(instance, "SkyboxDn", "")
-			setFPSBoostProperty(instance, "SkyboxFt", "")
-			setFPSBoostProperty(instance, "SkyboxLf", "")
-			setFPSBoostProperty(instance, "SkyboxRt", "")
-			setFPSBoostProperty(instance, "SkyboxUp", "")
-			setFPSBoostProperty(instance, "SunTextureId", "")
-			setFPSBoostProperty(instance, "MoonTextureId", "")
-			setFPSBoostProperty(instance, "CelestialBodiesShown", false)
-			setFPSBoostProperty(instance, "StarCount", 0)
-		elseif className == "Shirt" then
-			setFPSBoostProperty(instance, "ShirtTemplate", "")
-		elseif className == "Pants" then
-			setFPSBoostProperty(instance, "PantsTemplate", "")
-		elseif className == "ShirtGraphic" then
-			setFPSBoostProperty(instance, "Graphic", "")
-		elseif className == "Explosion" then
-			setFPSBoostProperty(instance, "Visible", false)
-		elseif fpsBoostDisabledClasses[className] then
-			setFPSBoostProperty(instance, "Enabled", false)
-		end
-
-		if instance:IsA("BasePart") then
-			setFPSBoostProperty(instance, "Material", Enum.Material.SmoothPlastic)
-			setFPSBoostProperty(instance, "MaterialVariant", "")
-			setFPSBoostProperty(instance, "Reflectance", 0)
-			setFPSBoostProperty(instance, "CastShadow", false)
 		end
 	end
 
-	---Apply render-wide FPS boost settings before processing descendants.
+	---Apply a small set of high-impact render settings.
 	local function applyFPSBoostGlobals()
 		setFPSBoostProperty(lighting, "GlobalShadows", false)
-		setFPSBoostProperty(lighting, "EnvironmentDiffuseScale", 0)
-		setFPSBoostProperty(lighting, "EnvironmentSpecularScale", 0)
-		setFPSBoostProperty(lighting, "ShadowSoftness", 0)
 		setFPSBoostProperty(lighting, "PrioritizeLightingQuality", false)
-		setFPSBoostProperty(lighting, "Technology", Enum.Technology.Compatibility)
 
 		local terrain = workspace:FindFirstChildOfClass("Terrain")
 		if terrain then
@@ -76294,7 +76235,6 @@ return LPH_NO_VIRTUALIZE(function()
 			setFPSBoostProperty(terrain, "WaterWaveSize", 0)
 			setFPSBoostProperty(terrain, "WaterWaveSpeed", 0)
 			setFPSBoostProperty(terrain, "WaterReflectance", 0)
-			setFPSBoostProperty(terrain, "WaterTransparency", 1)
 		end
 
 		pcall(function()
@@ -76340,22 +76280,38 @@ return LPH_NO_VIRTUALIZE(function()
 
 		local generation = fpsBoostGeneration
 		task.spawn(function()
-			local descendants = workspace:GetDescendants()
-			local lightingDescendants = lighting:GetDescendants()
+			-- Walk the hierarchy incrementally instead of allocating and processing the entire world at once.
+			local queue = { workspace }
+			local head = 1
+			local tail = 1
+			local processed = 0
 
-			for _, descendant in ipairs(lightingDescendants) do
-				descendants[#descendants + 1] = descendant
-			end
-
-			for index, descendant in ipairs(descendants) do
+			while head <= tail do
 				if not fpsBoostActive or generation ~= fpsBoostGeneration then
 					return
 				end
 
-				applyFPSBoost(descendant)
+				local parent = queue[head]
+				queue[head] = nil
+				head = head + 1
 
-				if index % 500 == 0 then
-					task.wait()
+				local childrenSuccess, children = pcall(parent.GetChildren, parent)
+				if not childrenSuccess then
+					continue
+				end
+
+				for _, descendant in ipairs(children) do
+					tail = tail + 1
+					queue[tail] = descendant
+					applyFPSBoost(descendant)
+					processed = processed + 1
+
+					if processed % 100 == 0 then
+						task.wait()
+						if not fpsBoostActive or generation ~= fpsBoostGeneration then
+							return
+						end
+					end
 				end
 			end
 		end)
@@ -76770,14 +76726,6 @@ return LPH_NO_VIRTUALIZE(function()
 		end
 	end
 
-	---Apply FPS boost to newly-created lighting objects.
-	---@param descendant Instance
-	local function onLightingDescendantAdded(descendant)
-		if fpsBoostActive then
-			applyFPSBoost(descendant)
-		end
-	end
-
 	---Set FPS boost immediately from the UI.
 	---@param enabled boolean
 	function Removal.setFPSBoost(enabled)
@@ -76804,8 +76752,6 @@ return LPH_NO_VIRTUALIZE(function()
 		removalMaid:add(
 			workspaceDescendantRemoving:connect("Removal_WorkspaceDescendantRemoving", onWorkspaceDescendantRemoving)
 		)
-		removalMaid:add(lightingDescendantAdded:connect("Removal_LightingDescendantAdded", onLightingDescendantAdded))
-
 		removalMaid:add(renderStepped:connect("Removal_RenderStepped", updateRemoval))
 		removalMaid:add(effectAddedSignal:connect("Removal_EffectAdded", updateRemovalEffects))
 
@@ -83659,7 +83605,7 @@ end
 function VisualsTab.initVisualRemovalsSection(groupbox)
 	groupbox:AddToggle("FPSBoost", {
 		Text = "FPS Boost",
-		Tooltip = "Maximum performance mode: simplify materials and disable textures, shadows, effects, lights, and costly rendering.",
+		Tooltip = "Low-overhead mode: reduce render quality and remove world textures without breaking gameplay effects.",
 		Default = false,
 		Callback = function(Value)
 			Removal.setFPSBoost(Value)
