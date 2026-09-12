@@ -54,6 +54,9 @@ local oldGetKey = nil
 -- Cached hooked function.
 local khGetKey = nil
 
+-- Cached gameplay remotes.
+local fallDamageRemote = nil
+
 -- InputClient caching.
 local lastCallingFunction = nil
 local lastFunctionCacheAttempt = 0
@@ -74,6 +77,20 @@ local INPUT_BLOCK = 5
 -- Input types two.
 local INPUT_TYPE_BEFORE = 1
 local INPUT_TYPE_AFTER = 2
+
+---Check whether an outgoing remote request should be blocked as fall damage.
+---@param remote Instance
+---@return boolean
+local function shouldBlockFallDamage(remote)
+	if not Configuration.expectToggleValue("NoFallDamage") then
+		return false
+	end
+
+	-- Resolve lazily as a fallback in case the game's remote table changes after initialization.
+	fallDamageRemote = KeyHandling.getRemote("FallDamage") or fallDamageRemote
+
+	return fallDamageRemote ~= nil and remote == fallDamageRemote
+end
 
 ---Handle flow state.
 ---@param type number
@@ -664,6 +681,11 @@ local onNameCall = LPH_NO_VIRTUALIZE(function(...)
 	local method = getnamecallmethod()
 	local name = self.Name
 
+	-- Catch standard `remote:FireServer(...)` calls before Roblox dispatches them.
+	if method == "FireServer" and shouldBlockFallDamage(self) then
+		return
+	end
+
 	if method == "Raycast" then
 		local callingScript = getcallingscript()
 		local _, info = findClientPhysicsLevel()
@@ -775,6 +797,11 @@ local onUnreliableFireServer = LPH_NO_VIRTUALIZE(function(...)
 		return Logger.warn("(%s) Anticheat is calling a unreliable ban remote.", self.Name)
 	end
 
+	-- Catch direct UnreliableRemoteEvent.FireServer(remote, ...) calls made by the game.
+	if not checkcaller() and shouldBlockFallDamage(self) then
+		return
+	end
+
 	local leftClickRemote = KeyHandling.getRemote("LeftClick")
 	local criticalRemote = KeyHandling.getRemote("CriticalClick")
 	local feintClickRemote = KeyHandling.getRemote("FeintClick")
@@ -823,6 +850,11 @@ local onFireServer = LPH_NO_VIRTUALIZE(function(...)
 
 	if banRemotes[self] then
 		return Logger.warn("(%s) Anticheat is calling a ban remote.", self.Name)
+	end
+
+	-- Catch direct RemoteEvent.FireServer(remote, ...) calls made by the game.
+	if not checkcaller() and shouldBlockFallDamage(self) then
+		return
 	end
 
 	local blockRemote = KeyHandling.getRemote("Block")
@@ -993,6 +1025,8 @@ function Hooking.init()
 	local clientActor = playerScripts:WaitForChild("ClientActor")
 	local clientManager = clientActor:WaitForChild("ClientManager")
 	local requests = replicatedStorage:WaitForChild("Requests")
+
+	fallDamageRemote = KeyHandling.getRemote("FallDamage")
 
 	---@note: Crucial part because of the actor and the error detection.
 	clientManager.Enabled = false
@@ -1169,6 +1203,8 @@ end
 ---Hooking detach.
 function Hooking.detach()
 	local localPlayer = playersService.LocalPlayer
+
+	fallDamageRemote = nil
 
 	if khGetKey and oldGetKey then
 		hookfunction(khGetKey, oldGetKey)

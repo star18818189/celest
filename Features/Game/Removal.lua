@@ -52,6 +52,11 @@ return LPH_NO_VIRTUALIZE(function()
 	local yunShulResonanceDoorMap = removalMaid:mark(OriginalStoreManager.new())
 	local hiveGateMap = removalMaid:mark(OriginalStoreManager.new())
 
+	-- FPS boost state.
+	local fpsBoostActive = false
+	local fpsBoostGeneration = 0
+	local fpsBoostOriginals = setmetatable({}, { __mode = "k" })
+
 	-- Signals.
 	local renderStepped = Signal.new(runService.RenderStepped)
 	local workspaceDescendantAdded = Signal.new(workspace.DescendantAdded)
@@ -63,6 +68,109 @@ return LPH_NO_VIRTUALIZE(function()
 	-- Last update.
 	local lastUpdate = os.clock()
 	local lastWindEffectTimestamp = os.clock()
+
+	---Set and remember an instance property for FPS boost restoration.
+	---@param instance Instance
+	---@param property string
+	---@param value any
+	local function setFPSBoostProperty(instance, property, value)
+		local originals = fpsBoostOriginals[instance]
+		if not originals then
+			originals = {}
+			fpsBoostOriginals[instance] = originals
+		end
+
+		if not originals[property] then
+			local success, original = pcall(function()
+				return instance[property]
+			end)
+			if not success then
+				return
+			end
+
+			originals[property] = { value = original }
+		end
+
+		pcall(function()
+			instance[property] = value
+		end)
+	end
+
+	---Remove render-heavy textures and material detail from an instance.
+	---@param instance Instance
+	local function applyFPSBoost(instance)
+		if instance:IsA("Decal") or instance:IsA("Texture") then
+			setFPSBoostProperty(instance, "Texture", "")
+		end
+
+		if instance:IsA("MeshPart") then
+			setFPSBoostProperty(instance, "TextureID", "")
+		end
+
+		if instance:IsA("SpecialMesh") then
+			setFPSBoostProperty(instance, "TextureId", "")
+		end
+
+		if instance:IsA("SurfaceAppearance") then
+			setFPSBoostProperty(instance, "ColorMap", "")
+			setFPSBoostProperty(instance, "MetalnessMap", "")
+			setFPSBoostProperty(instance, "NormalMap", "")
+			setFPSBoostProperty(instance, "RoughnessMap", "")
+		end
+
+		if instance:IsA("BasePart") then
+			setFPSBoostProperty(instance, "Material", Enum.Material.SmoothPlastic)
+			setFPSBoostProperty(instance, "MaterialVariant", "")
+			setFPSBoostProperty(instance, "Reflectance", 0)
+		end
+	end
+
+	---Restore everything changed by FPS boost.
+	local function restoreFPSBoost()
+		fpsBoostGeneration = fpsBoostGeneration + 1
+		fpsBoostActive = false
+
+		for instance, originals in next, fpsBoostOriginals do
+			for property, original in next, originals do
+				pcall(function()
+					instance[property] = original.value
+				end)
+			end
+		end
+
+		fpsBoostOriginals = setmetatable({}, { __mode = "k" })
+	end
+
+	---Enable or disable FPS boost.
+	---@param enabled boolean
+	local function setFPSBoostEnabled(enabled)
+		enabled = enabled == true
+		if enabled == fpsBoostActive then
+			return
+		end
+
+		if not enabled then
+			return restoreFPSBoost()
+		end
+
+		fpsBoostGeneration = fpsBoostGeneration + 1
+		fpsBoostActive = true
+
+		local generation = fpsBoostGeneration
+		task.spawn(function()
+			for index, descendant in ipairs(workspace:GetDescendants()) do
+				if not fpsBoostActive or generation ~= fpsBoostGeneration then
+					return
+				end
+
+				applyFPSBoost(descendant)
+
+				if index % 250 == 0 then
+					task.wait()
+				end
+			end
+		end)
+	end
 
 	---Update no echo modifiers.
 	---@param localPlayer Player
@@ -343,6 +451,8 @@ return LPH_NO_VIRTUALIZE(function()
 		else
 			noShadows:restore()
 		end
+
+		setFPSBoostEnabled(Configuration.expectToggleValue("FPSBoost"))
 	end
 
 	---Hide effect by unlinking it from being found.
@@ -429,6 +539,10 @@ return LPH_NO_VIRTUALIZE(function()
 	---On workspace descendant added.
 	---@param descendant Instance
 	local function onWorkspaceDescendantAdded(descendant)
+		if fpsBoostActive then
+			applyFPSBoost(descendant)
+		end
+
 		if descendant:IsA("Model") and descendant.Name == "ResonanceDoor" then
 			yunShulResonanceDoorMap:mark(descendant, "Parent")
 		end
@@ -465,6 +579,12 @@ return LPH_NO_VIRTUALIZE(function()
 		if damagePart then
 			damageBricksMap:mark(descendant, "Parent")
 		end
+	end
+
+	---Set FPS boost immediately from the UI.
+	---@param enabled boolean
+	function Removal.setFPSBoost(enabled)
+		setFPSBoostEnabled(enabled)
 	end
 
 	---On workspace descendant removing.
@@ -511,6 +631,7 @@ return LPH_NO_VIRTUALIZE(function()
 		-- Restore.
 		resetNoBlind()
 		restoreNoAcidWater()
+		restoreFPSBoost()
 
 		-- Log.
 		Logger.warn("Removal detached.")

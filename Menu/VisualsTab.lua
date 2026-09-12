@@ -7,6 +7,9 @@ local Configuration = require("Utility/Configuration")
 ---@module Features.Visuals.Visuals
 local Visuals = require("Features/Visuals/Visuals")
 
+---@module Features.Game.Removal
+local Removal = require("Features/Game/Removal")
+
 ---@module Utility.JSON
 local JSON = require("Utility/JSON")
 
@@ -293,6 +296,15 @@ end
 ---Initialize Visual Removals section.
 ---@param groupbox table
 function VisualsTab.initVisualRemovalsSection(groupbox)
+	groupbox:AddToggle("FPSBoost", {
+		Text = "FPS Boost",
+		Tooltip = "Hide world textures and material detail to improve rendering performance.",
+		Default = false,
+		Callback = function(Value)
+			Removal.setFPSBoost(Value)
+		end,
+	})
+
 	groupbox:AddToggle("NoFog", {
 		Text = "No Fog",
 		Tooltip = "Atmosphere and Fog effects are hidden.",

@@ -76133,6 +76133,11 @@ return LPH_NO_VIRTUALIZE(function()
 	local yunShulResonanceDoorMap = removalMaid:mark(OriginalStoreManager.new())
 	local hiveGateMap = removalMaid:mark(OriginalStoreManager.new())
 
+	-- FPS boost state.
+	local fpsBoostActive = false
+	local fpsBoostGeneration = 0
+	local fpsBoostOriginals = setmetatable({}, { __mode = "k" })
+
 	-- Signals.
 	local renderStepped = Signal.new(runService.RenderStepped)
 	local workspaceDescendantAdded = Signal.new(workspace.DescendantAdded)
@@ -76144,6 +76149,109 @@ return LPH_NO_VIRTUALIZE(function()
 	-- Last update.
 	local lastUpdate = os.clock()
 	local lastWindEffectTimestamp = os.clock()
+
+	---Set and remember an instance property for FPS boost restoration.
+	---@param instance Instance
+	---@param property string
+	---@param value any
+	local function setFPSBoostProperty(instance, property, value)
+		local originals = fpsBoostOriginals[instance]
+		if not originals then
+			originals = {}
+			fpsBoostOriginals[instance] = originals
+		end
+
+		if not originals[property] then
+			local success, original = pcall(function()
+				return instance[property]
+			end)
+			if not success then
+				return
+			end
+
+			originals[property] = { value = original }
+		end
+
+		pcall(function()
+			instance[property] = value
+		end)
+	end
+
+	---Remove render-heavy textures and material detail from an instance.
+	---@param instance Instance
+	local function applyFPSBoost(instance)
+		if instance:IsA("Decal") or instance:IsA("Texture") then
+			setFPSBoostProperty(instance, "Texture", "")
+		end
+
+		if instance:IsA("MeshPart") then
+			setFPSBoostProperty(instance, "TextureID", "")
+		end
+
+		if instance:IsA("SpecialMesh") then
+			setFPSBoostProperty(instance, "TextureId", "")
+		end
+
+		if instance:IsA("SurfaceAppearance") then
+			setFPSBoostProperty(instance, "ColorMap", "")
+			setFPSBoostProperty(instance, "MetalnessMap", "")
+			setFPSBoostProperty(instance, "NormalMap", "")
+			setFPSBoostProperty(instance, "RoughnessMap", "")
+		end
+
+		if instance:IsA("BasePart") then
+			setFPSBoostProperty(instance, "Material", Enum.Material.SmoothPlastic)
+			setFPSBoostProperty(instance, "MaterialVariant", "")
+			setFPSBoostProperty(instance, "Reflectance", 0)
+		end
+	end
+
+	---Restore everything changed by FPS boost.
+	local function restoreFPSBoost()
+		fpsBoostGeneration = fpsBoostGeneration + 1
+		fpsBoostActive = false
+
+		for instance, originals in next, fpsBoostOriginals do
+			for property, original in next, originals do
+				pcall(function()
+					instance[property] = original.value
+				end)
+			end
+		end
+
+		fpsBoostOriginals = setmetatable({}, { __mode = "k" })
+	end
+
+	---Enable or disable FPS boost.
+	---@param enabled boolean
+	local function setFPSBoostEnabled(enabled)
+		enabled = enabled == true
+		if enabled == fpsBoostActive then
+			return
+		end
+
+		if not enabled then
+			return restoreFPSBoost()
+		end
+
+		fpsBoostGeneration = fpsBoostGeneration + 1
+		fpsBoostActive = true
+
+		local generation = fpsBoostGeneration
+		task.spawn(function()
+			for index, descendant in ipairs(workspace:GetDescendants()) do
+				if not fpsBoostActive or generation ~= fpsBoostGeneration then
+					return
+				end
+
+				applyFPSBoost(descendant)
+
+				if index % 250 == 0 then
+					task.wait()
+				end
+			end
+		end)
+	end
 
 	---Update no echo modifiers.
 	---@param localPlayer Player
@@ -76424,6 +76532,8 @@ return LPH_NO_VIRTUALIZE(function()
 		else
 			noShadows:restore()
 		end
+
+		setFPSBoostEnabled(Configuration.expectToggleValue("FPSBoost"))
 	end
 
 	---Hide effect by unlinking it from being found.
@@ -76510,6 +76620,10 @@ return LPH_NO_VIRTUALIZE(function()
 	---On workspace descendant added.
 	---@param descendant Instance
 	local function onWorkspaceDescendantAdded(descendant)
+		if fpsBoostActive then
+			applyFPSBoost(descendant)
+		end
+
 		if descendant:IsA("Model") and descendant.Name == "ResonanceDoor" then
 			yunShulResonanceDoorMap:mark(descendant, "Parent")
 		end
@@ -76546,6 +76660,12 @@ return LPH_NO_VIRTUALIZE(function()
 		if damagePart then
 			damageBricksMap:mark(descendant, "Parent")
 		end
+	end
+
+	---Set FPS boost immediately from the UI.
+	---@param enabled boolean
+	function Removal.setFPSBoost(enabled)
+		setFPSBoostEnabled(enabled)
 	end
 
 	---On workspace descendant removing.
@@ -76592,6 +76712,7 @@ return LPH_NO_VIRTUALIZE(function()
 		-- Restore.
 		resetNoBlind()
 		restoreNoAcidWater()
+		restoreFPSBoost()
 
 		-- Log.
 		Logger.warn("Removal detached.")
@@ -83130,6 +83251,9 @@ local Configuration = require("Utility/Configuration")
 ---@module Features.Visuals.Visuals
 local Visuals = require("Features/Visuals/Visuals")
 
+---@module Features.Game.Removal
+local Removal = require("Features/Game/Removal")
+
 ---@module Utility.JSON
 local JSON = require("Utility/JSON")
 
@@ -83416,6 +83540,15 @@ end
 ---Initialize Visual Removals section.
 ---@param groupbox table
 function VisualsTab.initVisualRemovalsSection(groupbox)
+	groupbox:AddToggle("FPSBoost", {
+		Text = "FPS Boost",
+		Tooltip = "Hide world textures and material detail to improve rendering performance.",
+		Default = false,
+		Callback = function(Value)
+			Removal.setFPSBoost(Value)
+		end,
+	})
+
 	groupbox:AddToggle("NoFog", {
 		Text = "No Fog",
 		Tooltip = "Atmosphere and Fog effects are hidden.",
@@ -88593,6 +88726,9 @@ local oldGetKey = nil
 -- Cached hooked function.
 local khGetKey = nil
 
+-- Cached gameplay remotes.
+local fallDamageRemote = nil
+
 -- InputClient caching.
 local lastCallingFunction = nil
 local lastFunctionCacheAttempt = 0
@@ -88613,6 +88749,20 @@ local INPUT_BLOCK = 5
 -- Input types two.
 local INPUT_TYPE_BEFORE = 1
 local INPUT_TYPE_AFTER = 2
+
+---Check whether an outgoing remote request should be blocked as fall damage.
+---@param remote Instance
+---@return boolean
+local function shouldBlockFallDamage(remote)
+	if not Configuration.expectToggleValue("NoFallDamage") then
+		return false
+	end
+
+	-- Resolve lazily as a fallback in case the game's remote table changes after initialization.
+	fallDamageRemote = KeyHandling.getRemote("FallDamage") or fallDamageRemote
+
+	return fallDamageRemote ~= nil and remote == fallDamageRemote
+end
 
 ---Handle flow state.
 ---@param type number
@@ -89203,6 +89353,11 @@ local onNameCall = LPH_NO_VIRTUALIZE(function(...)
 	local method = getnamecallmethod()
 	local name = self.Name
 
+	-- Catch standard `remote:FireServer(...)` calls before Roblox dispatches them.
+	if method == "FireServer" and shouldBlockFallDamage(self) then
+		return
+	end
+
 	if method == "Raycast" then
 		local callingScript = getcallingscript()
 		local _, info = findClientPhysicsLevel()
@@ -89314,6 +89469,11 @@ local onUnreliableFireServer = LPH_NO_VIRTUALIZE(function(...)
 		return Logger.warn("(%s) Anticheat is calling a unreliable ban remote.", self.Name)
 	end
 
+	-- Catch direct UnreliableRemoteEvent.FireServer(remote, ...) calls made by the game.
+	if not checkcaller() and shouldBlockFallDamage(self) then
+		return
+	end
+
 	local leftClickRemote = KeyHandling.getRemote("LeftClick")
 	local criticalRemote = KeyHandling.getRemote("CriticalClick")
 	local feintClickRemote = KeyHandling.getRemote("FeintClick")
@@ -89362,6 +89522,11 @@ local onFireServer = LPH_NO_VIRTUALIZE(function(...)
 
 	if banRemotes[self] then
 		return Logger.warn("(%s) Anticheat is calling a ban remote.", self.Name)
+	end
+
+	-- Catch direct RemoteEvent.FireServer(remote, ...) calls made by the game.
+	if not checkcaller() and shouldBlockFallDamage(self) then
+		return
 	end
 
 	local blockRemote = KeyHandling.getRemote("Block")
@@ -89532,6 +89697,8 @@ function Hooking.init()
 	local clientActor = playerScripts:WaitForChild("ClientActor")
 	local clientManager = clientActor:WaitForChild("ClientManager")
 	local requests = replicatedStorage:WaitForChild("Requests")
+
+	fallDamageRemote = KeyHandling.getRemote("FallDamage")
 
 	---@note: Crucial part because of the actor and the error detection.
 	clientManager.Enabled = false
@@ -89708,6 +89875,8 @@ end
 ---Hooking detach.
 function Hooking.detach()
 	local localPlayer = playersService.LocalPlayer
+
+	fallDamageRemote = nil
 
 	if khGetKey and oldGetKey then
 		hookfunction(khGetKey, oldGetKey)
